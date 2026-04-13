@@ -10,7 +10,7 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-PREFIX = "Nuku"
+PREFIX = "n!"
 
 BOT_CONFIGS = [
     {"name": "bot1", "token_env": "BOT1_TOKEN", "id": 1492845514318676028},
