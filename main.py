@@ -20,6 +20,11 @@ BOT_CONFIGS = [
     {"name": "bot3", "token_env": "BOT3_TOKEN", "id": 1492845711887171706},
     {"name": "bot4", "token_env": "BOT4_TOKEN", "id": 1492846367582847066},
     {"name": "bot5", "token_env": "BOT5_TOKEN", "id": 1493291019029057586},
+    {"name": "bot6", "token_env": "BOT6_TOKEN", "id": 1493541193546469426},
+    {"name": "bot7", "token_env": "BOT7_TOKEN", "id": 1493542593198297229},
+    {"name": "bot8", "token_env": "BOT8_TOKEN", "id": 1493543079528108032},
+    {"name": "bot9", "token_env": "BOT9_TOKEN", "id": 1493543296826347631},
+    {"name": "bot10", "token_env": "BOT10_TOKEN", "id": 1493543908637020160},
 ]
 
 INVITE_BASE = "https://discord.com/api/oauth2/authorize?client_id={}&permissions=8&scope=bot%20applications.commands"
