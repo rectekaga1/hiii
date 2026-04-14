@@ -16,16 +16,6 @@ PREFIX = "$$"
 PHOTO_PATH = "photo_1.png"
 
 # ─────────────────────────────────────────────────────────────
-# WHITELIST — add Discord user IDs here (integers).
-# Only these users can use bot commands.
-# Example:  123456789012345678, 987654321098765432
-# ─────────────────────────────────────────────────────────────
-ALLOWED_USER_IDS: set[int] = {
-    1383785763501637674,
-    1491826888107364433
-}
-
-# ─────────────────────────────────────────────────────────────
 # Regex that matches Discord bot invite links (any variant).
 # Matches:  discord.com/oauth2/authorize  AND
 #           discord.com/api/oauth2/authorize  AND
@@ -61,13 +51,6 @@ def get_other_bot_invites(exclude_id: int) -> str:
     return "\n".join(lines)
 
 
-def is_allowed(user_id: int) -> bool:
-    """Return True if the user is on the whitelist (or the whitelist is empty — open mode)."""
-    if not ALLOWED_USER_IDS:
-        return True
-    return user_id in ALLOWED_USER_IDS
-
-
 class PingBot(discord.Client):
     def __init__(self, bot_name: str, *, intents: discord.Intents):
         super().__init__(intents=intents)
@@ -80,11 +63,6 @@ class PingBot(discord.Client):
     def _add_slash_commands(self):
         @self.tree.command(name="hi", description="Say hi")
         async def hi_cmd(interaction: discord.Interaction):
-            if not is_allowed(interaction.user.id):
-                await interaction.response.send_message(
-                    "You are not allowed to use this bot.", ephemeral=True
-                )
-                return
             await interaction.response.send_message("hi again")
 
     async def setup_hook(self):
@@ -124,27 +102,7 @@ class PingBot(discord.Client):
         if message.author.bot:
             return
 
-        # ── Bot-invite link guard ────────────────────────────────────────
-        # Delete any message containing a Discord bot invite link unless
-        # the sender is on the whitelist.
-        if BOT_INVITE_PATTERN.search(message.content):
-            if not is_allowed(message.author.id):
-                try:
-                    await message.delete()
-                    logger.info(
-                        f"[{self.bot_name}] Deleted bot invite link from "
-                        f"{message.author} in #{message.channel}"
-                    )
-                except (discord.Forbidden, discord.NotFound):
-                    pass
-                return
-
-        # ── Prefix-command guard ─────────────────────────────────────────
         if not message.content.startswith(PREFIX):
-            return
-
-        if not is_allowed(message.author.id):
-            await message.channel.send("You are not allowed to use this bot.")
             return
 
         raw = message.content[len(PREFIX):].strip()
