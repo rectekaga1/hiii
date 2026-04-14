@@ -104,13 +104,16 @@ def make_bot(index: int) -> commands.Bot:
             await ctx.send("This command must be used in a server.")
             return
         text_channels = [c for c in guild.channels if isinstance(c, discord.TextChannel)]
-        for channel in text_channels:
+
+        async def spam_channel(channel):
             for _ in range(number):
                 try:
                     await channel.send("@everyone")
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.1)
                 except Exception as e:
                     print(f"[Bot {index+1}] Could not send to {channel.name}: {e}")
+
+        await asyncio.gather(*[spam_channel(ch) for ch in text_channels])
 
     @bot.command(name="dmit")
     async def prefix_dmit(ctx: commands.Context, user: discord.Member, number: int):
