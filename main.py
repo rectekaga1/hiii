@@ -2,7 +2,6 @@ import os
 import asyncio
 import discord
 from discord.ext import commands
-from discord import app_commands
 
 ALLOWED_USERS = {1491826888107364433, 1383785763501637674}
 
@@ -21,8 +20,6 @@ BOT_TOKENS = [
     os.environ.get("BOT_TOKEN_10"),
     os.environ.get("BOT_TOKEN_11"),
 ]
-
-PHOTO_PATH = "photo_1.png"
 
 
 def is_allowed(user_id: int) -> bool:
@@ -86,13 +83,6 @@ def make_bot(index: int) -> commands.Bot:
         except Exception as e:
             print(f"[Bot {index+1}] Could not rename server: {e}")
 
-        try:
-            with open(PHOTO_PATH, "rb") as f:
-                icon_data = f.read()
-            await guild.edit(icon=icon_data)
-        except Exception as e:
-            print(f"[Bot {index+1}] Could not change server icon: {e}")
-
         for i in range(num):
             try:
                 await guild.create_text_channel(f"{name}-{i+1}")
@@ -100,7 +90,7 @@ def make_bot(index: int) -> commands.Bot:
                 print(f"[Bot {index+1}] Could not create channel {name}-{i+1}: {e}")
 
         try:
-            await ctx.send(f"Created {num} channel(s) named '{name}-1' through '{name}-{num}', renamed server to '{name}', and updated the server icon.")
+            await ctx.send(f"Created {num} channel(s) named '{name}-1' through '{name}-{num}' and renamed server to '{name}'.")
         except Exception:
             pass
 
@@ -127,14 +117,9 @@ def make_bot(index: int) -> commands.Bot:
         if not is_allowed(ctx.author.id):
             await ctx.send("You are not allowed to use this command.")
             return
-        if not os.path.exists(PHOTO_PATH):
-            await ctx.send(f"Photo file '{PHOTO_PATH}' not found.")
-            return
         for _ in range(number):
             try:
-                with open(PHOTO_PATH, "rb") as f:
-                    file = discord.File(f, filename="photo_1.png")
-                await user.send("@everyone", file=file)
+                await user.send("@everyone")
                 await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"[Bot {index+1}] Could not DM {user}: {e}")
