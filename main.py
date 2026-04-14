@@ -92,12 +92,12 @@ class PingBot(discord.Client):
         if cmd.startswith("setup"):
             parts = cmd.split()
             if len(parts) < 2:
-                await message.channel.send("Usage: `n!setup <number of pings>`")
+                await message.channel.send("Usage: `$$setup <number of pings>`")
                 return
             try:
                 ping_limit = int(parts[1])
             except ValueError:
-                await message.channel.send("Usage: `n!setup <number of pings>` — number must be an integer.")
+                await message.channel.send("Usage: `$$setup <number of pings>` — number must be an integer.")
                 return
             guild = message.guild
             if guild is None:
@@ -135,7 +135,7 @@ class PingBot(discord.Client):
         elif cmd.startswith("create "):
             parts = raw.split()
             if len(parts) < 3:
-                await message.channel.send("Usage: `n!create <name> <number>`")
+                await message.channel.send("Usage: `$$create <name> <number>`")
                 return
             ch_name = parts[1]
             try:
@@ -175,13 +175,13 @@ class PingBot(discord.Client):
                 logger.warning(f"[{self.bot_name}] Could not create 'hi da punda': {e}")
 
         elif cmd.startswith("doit "):
-            # n!doit <@user> <number>
+            # $$doit <@user> <number>
             if not message.mentions:
-                await message.channel.send("Usage: `n!doit <@user> <number>`")
+                await message.channel.send("Usage: `$$doit <@user> <number>`")
                 return
             parts = raw.split()
             if len(parts) < 3:
-                await message.channel.send("Usage: `n!doit <@user> <number>`")
+                await message.channel.send("Usage: `$$doit <@user> <number>`")
                 return
             try:
                 count = int(parts[-1])
@@ -228,7 +228,7 @@ class PingBot(discord.Client):
 
     async def _safe_delete_channel(self, channel: discord.abc.GuildChannel):
         try:
-            await channel.delete(reason="n!clear command")
+            await channel.delete(reason="$$clear command")
         except discord.NotFound:
             pass
         except discord.Forbidden:
